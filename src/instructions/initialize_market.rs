@@ -8,7 +8,6 @@ pub fn initialize_market_instruction(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
-    msg!("🚀 My program started");
     let mut iter = accounts.iter();
 
     let accounts_authority = next_account_info(&mut iter)?;
@@ -202,9 +201,11 @@ pub fn initialize_market_instruction(
     let bids_data: &mut OrderBook = bytemuck::from_bytes_mut(&mut bids_raw_data);
     
     bids_data.side = Side::Bid;
-    bids_data.order_count = 0;
     bids_data.market = market_account.key.clone();
-    bids_data.orders = [Order::zeroed(); 1024];
+    bids_data.next_order_id = 0;
+    bids_data.orders = [Order::zeroed(); 10];
+    // bids_data.orders = [Order::zeroed(); 1024];
+    bids_data.slots_filled = 0;
     
     msg!("Initialised data inside bids account");
 
@@ -213,9 +214,11 @@ pub fn initialize_market_instruction(
     let asks_data: &mut OrderBook = bytemuck::from_bytes_mut(&mut asks_raw_data);
 
     asks_data.side = Side::Ask;
-    asks_data.order_count = 0;
     asks_data.market = market_account.key.clone();
-    asks_data.orders = [Order::zeroed(); 1024];
+    asks_data.orders = [Order::zeroed(); 10];
+    // asks_data.orders = [Order::zeroed(); 1024];    
+    asks_data.next_order_id = 0;
+    asks_data.slots_filled = 0;
 
     msg!("Initialised data inside asks account");
 

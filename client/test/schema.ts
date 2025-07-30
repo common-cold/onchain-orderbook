@@ -1,5 +1,5 @@
 import * as borsh from "borsh";
-import { textSpanOverlapsWith } from "typescript";
+import BN from "bn.js";
 
 const PubKeyType = {
     "array": {
@@ -7,7 +7,9 @@ const PubKeyType = {
         type: "u8"
     }
 };
-export const ORDERBOOK_LEN = 99369;
+
+export const ORDERBOOK_LEN = 1013;
+// export const ORDERBOOK_LEN = 99371;
 
 
 export class MarketState {
@@ -102,34 +104,130 @@ export const OrderSchema: borsh.Schema = {
 
 export class OrderBook {
     side: Number;
-    order_count: bigint;
     market: Uint8Array;
+    next_order_id: bigint;
     orders: Order[];
+    slots_filled: Number;
 
     constructor(fields: {
         side: Number;
-        order_count: bigint;
         market: Uint8Array;
+        next_order_id: bigint;
         orders: Order[];
+        slots_filled: Number;
     }) {
         this.side = fields.side;
-        this.order_count = fields.order_count;
         this.market = fields.market;
+        this.next_order_id = fields.next_order_id;
         this.orders = fields.orders;
+        this.slots_filled = fields.slots_filled;
     }
 }
 
 export const OrderBookSchema: borsh.Schema = {
     struct: {
         side: "u8",
-        order_count: "u64",
         market: PubKeyType,
+        next_order_id: "u64",
         orders: {
-            array: {
-                len: 1024,
+            "array": {
+                len: 10,
+                // len: 1024,
                 type: OrderSchema
             }
-        }
+        },
+        slots_filled: "u16"
+    }
+}
+
+export class OpenOrderAccount {
+    owner: Uint8Array;
+    market: Uint8Array;
+    order_ids: BN[];
+    next_array_index: Number;
+    bump: Number;
+
+    constructor(fields: {
+        owner: Uint8Array;
+        market: Uint8Array;
+        order_ids: BN[];
+        next_array_index: Number;
+        bump: Number;
+    }) {
+        this.owner = fields.owner;
+        this.market = fields.market;
+        this.order_ids = fields.order_ids;
+        this.next_array_index = fields.next_array_index;
+        this.bump = fields.bump;
+    }
+}
+
+export const OpenOrderAccountSchema: borsh.Schema = {
+    struct: {
+        owner: PubKeyType,
+        market: PubKeyType,
+        order_ids: {
+            array: {
+                len: 64,
+                type: "u64"
+            }
+        },
+        next_array_index: "u8",
+        bump: "u8"
+    }
+}
+
+
+export class UserMarketAccount {
+    owner: Uint8Array;
+    market: Uint8Array;
+    free_coin: bigint;
+    locked_coin: bigint;
+    free_pc: bigint;
+    locked_pc: bigint;
+    open_order: Uint8Array;
+    bump: Number;
+
+    constructor(fields: {
+        owner: Uint8Array;
+        market: Uint8Array;
+        free_coin: bigint;
+        locked_coin: bigint;
+        free_pc: bigint;
+        locked_pc: bigint;
+        open_order: Uint8Array;
+        bump: Number;
+    }) {
+        this.owner = fields.owner;
+        this.market = fields.market;
+        this.free_coin = fields.free_coin;
+        this.locked_coin = fields.locked_coin;
+        this.free_pc = fields.free_pc;
+        this.locked_pc = fields.locked_pc;
+        this.open_order = fields.open_order;
+        this.bump = fields.bump;
+    }
+}
+
+export const UserMarketAccountSchema: borsh.Schema = {
+    struct: {
+        owner: PubKeyType,
+        market: PubKeyType,
+        free_coin: "u64",
+        locked_coin: "u64",
+        free_pc: "u64",
+        locked_pc: "u64",
+        open_order: PubKeyType,
+        bump: "u8"
+    }
+}
+
+export const CreateOrderSchema: borsh.Schema = {
+    struct: {
+        side: "u8",
+        limit_price: "u64",
+        coin_qty: "u64",
+        pc_qty: "u64"
     }
 }
 
