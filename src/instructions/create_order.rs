@@ -11,8 +11,6 @@ pub fn create_order(
     accounts: &[AccountInfo],
     args: CreateOrderArgs
 ) -> ProgramResult {
-    msg!("Inside Create Order");
-
     let mut iter = accounts.iter();
 
     let accounts_authority = next_account_info(&mut iter)?;
@@ -269,7 +267,7 @@ pub fn create_order(
     let mut order_indexes_to_remove: Vec<usize> = Vec::new();
 
     for i in 0..maker_book.slots_filled {
-        let mut maker_order = maker_book.orders[i as usize];
+        let mut maker_order = &mut maker_book.orders[i as usize];
         
         if coin_qty_remaining == 0 {
             break;
@@ -298,15 +296,19 @@ pub fn create_order(
         }
 
         //emit fill event for this order
+        msg!("emit fill");
     }
-
     msg!("Matching complete");
 
+    
     //remove filled orders from maker book
     for i in 0..order_indexes_to_remove.len() {
         maker_book.remove_order(order_indexes_to_remove[i])?;
     }
-    msg!("Removed filled order in maker book");
+    if order_indexes_to_remove.len() != 0 {
+        msg!("Remove filled orders from maker book")
+    }
+    
 
     //add unfilled orders in taker book
     if coin_qty_remaining > 0 {
@@ -327,8 +329,9 @@ pub fn create_order(
         };
         taker_book.add_order(remaining_order)?;
         taker_book.next_order_id += 1;
+        msg!("Added unfilled order in maker book");
     }
-    msg!("Added unfilled order in maker book");
+    
 
     //transfer extra funds to vault if needed
     if deposit_amount > 0 {

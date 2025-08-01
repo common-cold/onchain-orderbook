@@ -8,9 +8,6 @@ const PubKeyType = {
     }
 };
 
-export const ORDERBOOK_LEN = 1013;
-// export const ORDERBOOK_LEN = 99371;
-
 
 export class MarketState {
     coin_vault: Uint8Array;
