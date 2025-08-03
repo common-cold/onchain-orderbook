@@ -1,8 +1,9 @@
-use std::io::Error;
-
 use borsh::{BorshDeserialize, BorshSerialize};
-use solana_program::{entrypoint::ProgramResult, msg, program_error::ProgramError, pubkey::Pubkey, rent::{self, Rent}};
+use solana_program::{msg, program_error::ProgramError, pubkey::Pubkey};
 use bytemuck::{Pod, Zeroable};
+
+
+pub const MAX_EVENT: u16 = 512; 
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct MarketState {
@@ -22,7 +23,7 @@ impl MarketState {
 
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, BorshSerialize, BorshDeserialize)]
 #[borsh(use_discriminant=true)]
 pub enum Side {
     Bid = 0,
@@ -203,30 +204,79 @@ impl UserMarketAccount {
     }
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Debug, BorshSerialize, BorshDeserialize)]
+#[borsh(use_discriminant=true)]
+pub enum EventType {
+    Fill = 0,
+    Out = 1 
+}
+unsafe impl Zeroable for EventType {}
+unsafe impl Pod for EventType {}
 
-pub struct TradeState {
-    pub coin_unlocked: u64,
-    pub native_pc_unlocked: u64,
 
-    pub coin_credit: u64,
-    pub native_pc_credit: u64,
-
-    pub coin_debit: u64,
-    pub native_pc_debit: u64,
+#[repr(C, packed)]
+#[derive(Clone, Copy, Zeroable, Pod)]
+pub struct Event {
+    pub event_type: EventType,
+    pub side: Side,
+    pub maker: Pubkey,
+    pub taker: Pubkey,
+    pub coin_qty: u64,
+    pub pc_qty: u64,
+    pub maker_order_id: u64,
 }
 
-impl TradeState {
-    pub fn zero() -> Self {
-        Self { 
-            coin_unlocked: 0, 
-            native_pc_unlocked: 0, 
-            coin_credit: 0, 
-            native_pc_credit: 0, 
-            coin_debit: 0, 
-            native_pc_debit: 0 
+
+#[repr(C, packed)]
+#[derive(Copy, Clone, Zeroable, Pod)]
+
+pub struct MarketEventsAccount {
+    pub market: Pubkey,
+    pub head: u16,
+    pub tail: u16,
+    pub events: [Event; MAX_EVENT as usize],
+}
+
+impl MarketEventsAccount {
+    pub const LEN: u16 = 32 + 2 + 2 + (90 * MAX_EVENT);   //46,116 bytes
+
+    pub const DRAIN_LIMIT: u16 = 5;
+
+    pub fn enqueue(&mut self, event: Event) -> Result<bool, ProgramError> {
+        if self.is_full() {
+            return Ok(false)
         }
+        self.events[self.head as usize] = event;
+        self.head = (self.head + 1) % MAX_EVENT;
+        Ok(true)
+    }
+
+    pub fn dequeue(&mut self) -> Result<Option<Event>, ProgramError> {
+        if self.is_empty() {
+            return Ok(None)
+        }
+        let event = self.events[self.tail as usize];
+        self.tail = (self.tail + 1) % MAX_EVENT;
+        Ok(Some(event))
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        return self.head == self.tail;
+    }
+
+    pub fn is_full(&mut self) -> bool {
+        return (self.head + 1) % MAX_EVENT == self.tail
+    }
+
+    pub fn size(&mut self) -> u16 {
+        if self.head >= self.tail {
+            return self.head - self.tail;
+        }
+        return MAX_EVENT - (self.tail - self.head);
     }
 }
+
 
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -235,4 +285,9 @@ pub struct CreateOrderArgs {
     pub limit_price: u64,
     pub coin_qty: u64,
     pub pc_qty: u64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct ConsumeEventsArgs {
+    pub drain_count: u8
 }

@@ -2,7 +2,7 @@ use borsh::BorshSerialize;
 use bytemuck::Zeroable;
 use solana_program::{account_info::{next_account_info, AccountInfo}, entrypoint::ProgramResult, msg, program::{invoke, invoke_signed}, program_error::ProgramError, program_pack::Pack, pubkey::Pubkey, rent::self, system_instruction::create_account};
 use spl_token::{instruction::initialize_account, state::Account};
-use crate::{error::OrderbookError, state::{MarketState, Order, OrderBook, Side}};
+use crate::{error::OrderbookError, state::{Event, MarketEventsAccount, MarketState, Order, OrderBook, Side, MAX_EVENT}};
 
 pub fn initialize_market_instruction(
     program_id: &Pubkey,
@@ -12,6 +12,7 @@ pub fn initialize_market_instruction(
 
     let accounts_authority = next_account_info(&mut iter)?;
     let market_account = next_account_info(&mut iter)?;
+    let market_events_account = next_account_info(&mut iter)?;
     let coin_mint_account = next_account_info(&mut iter)?;
     let pc_mint_account = next_account_info(&mut iter)?;
     let coin_vault_account = next_account_info(&mut iter)?;
@@ -35,6 +36,12 @@ pub fn initialize_market_instruction(
 
     if *market_account.key != market_pda {
         msg!("Invalid market account provided, expected: {}", market_pda);
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    //verify market events account
+    if *market_events_account.owner != *program_id {
+        msg!("Invalid market events account provided, it has wrong owner");
         return Err(ProgramError::InvalidAccountData);
     }
     
@@ -78,7 +85,7 @@ pub fn initialize_market_instruction(
         return Err(ProgramError::InvalidAccountData);
     }
 
-    msg!("Account verification success");
+    msg!("Accounts verification success");
 
     //create market account
     let create_market_ix = create_account(
@@ -105,6 +112,21 @@ pub fn initialize_market_instruction(
     )?;
 
     msg!("Created Market account");
+
+
+    //initialize data inside market_events_account
+    let mut events_acc_raw_data = market_events_account.data.borrow_mut();
+    msg!("DATA LEN = {}", events_acc_raw_data.len());
+    let space = std::mem::size_of::<MarketEventsAccount>();
+    msg!("DATSTRUCTA LEN = {}", space);
+    let events_acc_data: &mut MarketEventsAccount = bytemuck::from_bytes_mut(&mut events_acc_raw_data);
+
+    events_acc_data.market = *market_account.key;
+    events_acc_data.head = 0;
+    events_acc_data.tail = 0;
+    events_acc_data.events = [Event::zeroed(); MAX_EVENT as usize];
+
+    msg!("Initialised data inside market events account");
 
 
     //create and initialize coin_vault token account

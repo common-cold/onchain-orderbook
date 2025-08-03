@@ -1,9 +1,9 @@
 import { ACCOUNT_SIZE, AccountLayout, ASSOCIATED_TOKEN_PROGRAM_ID, createAssociatedTokenAccountInstruction, createInitializeAccountInstruction, createInitializeMintInstruction, createMintToInstruction, getAccount, getAccountLen, getAssociatedTokenAddressSync, getMinimumBalanceForRentExemptMint, getMintLen, initializeMintInstructionData, MINT_SIZE, mintToInstructionData, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { AccountMeta, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { FailedTransactionMetadata, LiteSVM, TransactionMetadata } from "litesvm";
-import { CreateOrderSchema, MarketState, MarketStateSchema, OpenOrderAccount, OpenOrderAccountSchema, OrderBook, OrderBookSchema, Side, UserMarketAccount, UserMarketAccountSchema } from "./schema";
+import { ConsumeEventsSchema, CreateOrderSchema, EventType, MarketEventsAccount, MarketEventsAccountSchema, MarketState, MarketStateSchema, OpenOrderAccount, OpenOrderAccountSchema, OrderBook, OrderBookSchema, Side, UserMarketAccount, UserMarketAccountSchema } from "./schema";
 import * as borsh from "borsh";
-import { createSideEncodedOrderId, ORDERBOOK_LEN } from "./utils";
+import { createSideEncodedOrderId, EVENT_ACCOUNT_LEN, MAX_DRAIN_COUNT, ORDERBOOK_LEN } from "./utils";
 
 
 describe("Orderbook tests", () => {
@@ -11,6 +11,7 @@ describe("Orderbook tests", () => {
     let programId: PublicKey;
     let accountsAuthority: Keypair;
     let market: PublicKey;
+    let marketEventsAccount: Keypair;
     let coinVault: PublicKey;
     let pcVault: PublicKey;
     let coinMint: Keypair;
@@ -18,6 +19,8 @@ describe("Orderbook tests", () => {
     let bids: Keypair;
     let asks: Keypair;
     let user: Keypair;
+    let user2: Keypair;
+    let user3: Keypair;
     let userCoinAta: PublicKey;
     let userPcAta: PublicKey;
     let openOrderAccount: PublicKey;
@@ -38,12 +41,30 @@ describe("Orderbook tests", () => {
         accountsAuthority = new Keypair();
         svm.airdrop(accountsAuthority.publicKey, BigInt(100 * LAMPORTS_PER_SOL));
 
+        //create market events account
+        marketEventsAccount = new Keypair();
+        const mktEventsAccountIx = new Transaction().add(
+            SystemProgram.createAccount({
+                fromPubkey: accountsAuthority.publicKey,
+                newAccountPubkey: marketEventsAccount.publicKey,
+                lamports: Number(svm.minimumBalanceForRentExemption(BigInt(EVENT_ACCOUNT_LEN))),
+                space: EVENT_ACCOUNT_LEN,
+                programId: programId
+            })
+        );
+        mktEventsAccountIx.feePayer = accountsAuthority.publicKey;
+        mktEventsAccountIx.recentBlockhash = svm.latestBlockhash();
+        mktEventsAccountIx.sign(accountsAuthority, marketEventsAccount);
+        svm.sendTransaction(mktEventsAccountIx);
+
+
+        //create mint accounts
         coinMint = new Keypair();
         const coinMintTx = new Transaction().add(
             SystemProgram.createAccount({
                 fromPubkey: accountsAuthority.publicKey,
                 newAccountPubkey: coinMint.publicKey,
-                lamports: Number(svm.minimumBalanceForRentExemption(BigInt(ACCOUNT_SIZE))),
+                lamports: Number(svm.minimumBalanceForRentExemption(BigInt(MINT_SIZE))),
                 space: MINT_SIZE,
                 programId: TOKEN_PROGRAM_ID
             }),
@@ -187,6 +208,7 @@ describe("Orderbook tests", () => {
             keys: [
                 {pubkey: accountsAuthority.publicKey, isSigner: true, isWritable: true},
                 {pubkey: market, isSigner: false, isWritable: true},
+                {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
                 {pubkey: coinMint.publicKey, isSigner: false, isWritable: true},
                 {pubkey: pcMint.publicKey, isSigner: false, isWritable: true},
                 {pubkey: coinVault, isSigner: false, isWritable: true},
@@ -230,7 +252,7 @@ describe("Orderbook tests", () => {
             expect(new PublicKey(bidsData.market)).toStrictEqual(market);
 
 
-            // //asks checks
+            //asks checks
             let asksInfo = svm.getAccount(asks.publicKey);
             //@ts-ignore
             const asksData = new OrderBook(borsh.deserialize(OrderBookSchema, asksInfo!.data));
@@ -238,6 +260,15 @@ describe("Orderbook tests", () => {
             expect(asksData.slots_filled).toBe(0);
             expect(asksData.next_order_id).toBe(BigInt(0));
             expect(new PublicKey(asksData.market)).toStrictEqual(market);
+
+            //market events account checks
+            let eventAccInfo = svm.getAccount(marketEventsAccount.publicKey);
+            //@ts-ignore
+            const eventAccData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, eventAccInfo!.data));
+            expect(new PublicKey(eventAccData.market)).toStrictEqual(market);
+            expect(eventAccData.head).toBe(0);
+            expect(eventAccData.tail).toBe(0);
+
         } catch (e) {
             console.log(e);
         }
@@ -261,6 +292,7 @@ describe("Orderbook tests", () => {
                 keys: [
                     {pubkey: accountsAuthority.publicKey, isSigner: true, isWritable: true},
                     {pubkey: market, isSigner: false, isWritable: true},
+                    {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
                     {pubkey: user.publicKey, isSigner: true, isWritable: true},
                     {pubkey: userMarketAccount, isSigner: false, isWritable: true},
                     {pubkey: openOrderAccount, isSigner: false, isWritable: true},
@@ -343,6 +375,13 @@ describe("Orderbook tests", () => {
                 const userPcVaultData = AccountLayout.decode(userPcVaultInfo!.data);
                 expect(userPcVaultData.amount).toBe(BigInt(10000 - test2BidPcQty));
 
+                //Market Event Account checks
+                let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+                //@ts-ignore
+                const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+                expect(mktEventData.head).toBe(0);
+                expect(mktEventData.tail).toBe(0);
+
             } catch (e) {
                 console.log(e);
             }
@@ -372,6 +411,7 @@ describe("Orderbook tests", () => {
                 keys: [
                     {pubkey: accountsAuthority.publicKey, isSigner: true, isWritable: true},
                     {pubkey: market, isSigner: false, isWritable: true},
+                    {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
                     {pubkey: user.publicKey, isSigner: true, isWritable: true},
                     {pubkey: userMarketAccount, isSigner: false, isWritable: true},
                     {pubkey: openOrderAccount, isSigner: false, isWritable: true},
@@ -449,17 +489,23 @@ describe("Orderbook tests", () => {
                 const mktCoinVaultData = AccountLayout.decode(mktCoinVaultInfo!.data);
                 expect(mktCoinVaultData.amount).toBe(BigInt(test2AskCoinQty));
 
-
                 //User's Coin ATA checks
                 let userCoinAtaInfo = svm.getAccount(userCoinAta);
                 const userCoinAtaData = AccountLayout.decode(userCoinAtaInfo!.data);
                 expect(userCoinAtaData.amount).toBe(BigInt(10 - test2AskCoinQty));
+
+                //Market Event Account checks
+                let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+                //@ts-ignore
+                const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+                expect(mktEventData.head).toBe(0);
+                expect(mktEventData.tail).toBe(0);
             } catch (e) {
                 console.log(e);
             }
         }
 
-         //Current OrderBook
+        //Current OrderBook
         // ASK
         // 200 | 5
         // ----------
@@ -468,8 +514,8 @@ describe("Orderbook tests", () => {
     });
 
     test("Place Bid, Ask Order and perform order matching", async () => {
-        let user2 = new Keypair();
-        let user3 = new Keypair();
+        user2 = new Keypair();
+        user3 = new Keypair();
 
         svm.airdrop(user2.publicKey, BigInt(100 * LAMPORTS_PER_SOL));
         svm.airdrop(user3.publicKey, BigInt(100 * LAMPORTS_PER_SOL));
@@ -561,7 +607,7 @@ describe("Orderbook tests", () => {
         });
 
 
-        //Current OrderBook
+        //Current OrderBook From Previous Test
         // ASK
         // 200 | 5
         // ----------
@@ -582,6 +628,7 @@ describe("Orderbook tests", () => {
                 keys: [
                     {pubkey: accountsAuthority.publicKey, isSigner: true, isWritable: true},
                     {pubkey: market, isSigner: false, isWritable: true},
+                    {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
                     {pubkey: user3.publicKey, isSigner: true, isWritable: true},
                     {pubkey: userMarketAccount3, isSigner: false, isWritable: true},
                     {pubkey: openOrderAccount3, isSigner: false, isWritable: true},
@@ -643,6 +690,21 @@ describe("Orderbook tests", () => {
             let mktCoinVaultInfo = svm.getAccount(coinVault);
             const mktCoinVaultData = AccountLayout.decode(mktCoinVaultInfo!.data);
             expect(mktCoinVaultData.amount).toBe(BigInt(test2AskCoinQty));
+
+            //Market Event Account checks
+            let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+            //@ts-ignore
+            const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+            expect(mktEventData.head).toBe(1);
+            expect(mktEventData.tail).toBe(0);
+            let event = mktEventData.events[mktEventData.head.valueOf() - 1];
+            expect(event.event_type).toBe(EventType.Fill);
+            expect(event.side).toBe(Side.Ask);
+            expect(new PublicKey(event.maker)).toStrictEqual(user.publicKey);
+            expect(new PublicKey(event.taker)).toStrictEqual(user3.publicKey);
+            expect(event.coin_qty).toBe(BigInt(3));
+            expect(event.pc_qty).toBe(BigInt(600));
+            expect(event.maker_order_id).toBe(asksData.orders[0].order_id); //it matched with first order in asks side
         }
         
         //Current OrderBook
@@ -667,6 +729,7 @@ describe("Orderbook tests", () => {
                 keys: [
                     {pubkey: accountsAuthority.publicKey, isSigner: true, isWritable: true},
                     {pubkey: market, isSigner: false, isWritable: true},
+                    {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
                     {pubkey: user2.publicKey, isSigner: true, isWritable: true},
                     {pubkey: userMarketAccount2, isSigner: false, isWritable: true},
                     {pubkey: openOrderAccount2, isSigner: false, isWritable: true},
@@ -734,6 +797,21 @@ describe("Orderbook tests", () => {
             let mktCoinVaultInfo = svm.getAccount(coinVault);
             const mktCoinVaultData = AccountLayout.decode(mktCoinVaultInfo!.data);
             expect(mktCoinVaultData.amount).toBe(BigInt(test2AskCoinQty + 7));
+
+            //Market Event Account checks
+            let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+            //@ts-ignore
+            const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+            expect(mktEventData.head).toBe(2);
+            expect(mktEventData.tail).toBe(0);
+            let event = mktEventData.events[mktEventData.head.valueOf() - 1];
+            expect(event.event_type).toBe(EventType.Fill);
+            expect(event.side).toBe(Side.Bid);
+            expect(new PublicKey(event.maker)).toStrictEqual(user.publicKey);
+            expect(new PublicKey(event.taker)).toStrictEqual(user2.publicKey);
+            expect(event.coin_qty).toBe(BigInt(5));
+            expect(event.pc_qty).toBe(BigInt(500));
+            expect(event.maker_order_id).toBe(bidsData.orders[0].order_id); //it matched with first order in bids side
         }
 
         //Current OrderBook
@@ -744,6 +822,146 @@ describe("Orderbook tests", () => {
         //
         // BID
     });
+
+    test("Consume Events and settle balances from Market Events Account", async () => {
+        let userMarketInfo = retrieveMakerTakerPubKeyFromEventQueueCronMethod(programId, market, marketEventsAccount.publicKey);
+        if (!userMarketInfo) { 
+            return;
+        }
+
+        let {userMarketList, count} = userMarketInfo;
+
+        let args = {
+            drain_count: count
+        }
+
+        let userMarketAccount = PublicKey.findProgramAddressSync(
+            [
+                Buffer.from("user_market_account"),
+                market.toBuffer(),
+                user.publicKey.toBuffer()
+            ],
+            programId
+        )[0];
+        let userMarketAccount2 = PublicKey.findProgramAddressSync(
+            [
+                Buffer.from("user_market_account"),
+                market.toBuffer(),
+                user2.publicKey.toBuffer()
+            ],
+            programId
+        )[0];
+        let userMarketAccount3 = PublicKey.findProgramAddressSync(
+            [
+                Buffer.from("user_market_account"),
+                market.toBuffer(),
+                user3.publicKey.toBuffer()
+            ],
+            programId
+        )[0];
+
+        //Checks before Txn
+        {
+            let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+            //@ts-ignore
+            const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+            expect(mktEventData.head).toBe(2);
+            expect(mktEventData.tail).toBe(0);
+
+            //Users' market account checks
+            let userMarketInfo1 = svm.getAccount(userMarketAccount);
+            //@ts-ignore
+            const userMarketData = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo1?.data));
+            expect(userMarketData.free_coin).toBe(BigInt(0));
+            expect(userMarketData.locked_coin).toBe(BigInt(5));
+            expect(userMarketData.free_pc).toBe(BigInt(0));
+            expect(userMarketData.locked_pc).toBe(BigInt(520));
+
+            let userMarketInfo3 = svm.getAccount(userMarketAccount3);
+            //@ts-ignore
+            const userMarketData3 = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo3?.data));
+            expect(userMarketData3.free_coin).toBe(BigInt(0));
+            expect(userMarketData3.locked_coin).toBe(BigInt(0));
+            expect(userMarketData3.free_pc).toBe(BigInt(0));
+            expect(userMarketData3.locked_pc).toBe(BigInt(660));
+
+            let userMarketInfo2 = svm.getAccount(userMarketAccount2);
+            //@ts-ignore
+            const userMarketData2 = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo2?.data));
+            expect(userMarketData2.free_coin).toBe(BigInt(0));
+            expect(userMarketData2.locked_coin).toBe(BigInt(7));
+            expect(userMarketData2.free_pc).toBe(BigInt(0));
+            expect(userMarketData2.locked_pc).toBe(BigInt(0));
+        }
+
+        let ix = new TransactionInstruction({
+            keys: [
+                {pubkey: market, isSigner: false, isWritable: true},
+                {pubkey: marketEventsAccount.publicKey, isSigner: false, isWritable: true},
+                {pubkey: coinMint.publicKey, isSigner: false, isWritable: true},
+                {pubkey: pcMint.publicKey, isSigner: false, isWritable: true},
+                {pubkey: SystemProgram.programId, isSigner: false, isWritable: false},
+                {pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false},
+                {pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false},
+            ],
+            programId: programId,
+            data: Buffer.concat([Buffer.from([2]), Buffer.from(borsh.serialize(ConsumeEventsSchema, args))]) 
+        });
+
+        userMarketList.forEach(pubKey => {
+            let accountMeta: AccountMeta = {
+                pubkey: pubKey,
+                isSigner: false,
+                isWritable: true
+            };
+            ix.keys.push(accountMeta);
+        });
+
+        let tx = new Transaction().add(ix);
+        tx.recentBlockhash = svm.latestBlockhash();
+        tx.feePayer = accountsAuthority.publicKey;
+        tx.sign(accountsAuthority);
+        const sig = svm.sendTransaction(tx);
+        if (sig instanceof TransactionMetadata) {
+            console.log(sig.toString());
+        } else if (sig instanceof FailedTransactionMetadata) {
+            console.log(sig.toString());
+        }
+
+        //checks after Txn
+        let mktEventInfo = svm.getAccount(marketEventsAccount.publicKey);
+        //@ts-ignore
+        const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+        expect(mktEventData.head).toBe(2);
+        expect(mktEventData.tail).toBe(2);  //tail jumped 2 steps indicating 2 events drained
+
+        //Users' market account checks
+        let userMarketInfo1 = svm.getAccount(userMarketAccount);
+        //@ts-ignore
+        const userMarketData = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo1?.data));
+        expect(userMarketData.free_coin).toBe(BigInt(5));
+        expect(userMarketData.locked_coin).toBe(BigInt(5));
+        expect(userMarketData.free_pc).toBe(BigInt(600));
+        expect(userMarketData.locked_pc).toBe(BigInt(520));
+
+        let userMarketInfo3 = svm.getAccount(userMarketAccount3);
+        //@ts-ignore
+        const userMarketData3 = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo3?.data));
+        expect(userMarketData3.free_coin).toBe(BigInt(3));
+        expect(userMarketData3.locked_coin).toBe(BigInt(0));
+        expect(userMarketData3.free_pc).toBe(BigInt(0));
+        expect(userMarketData3.locked_pc).toBe(BigInt(660));
+
+        let userMarketInfo2 = svm.getAccount(userMarketAccount2);
+        //@ts-ignore
+        const userMarketData2 = new UserMarketAccount(borsh.deserialize(UserMarketAccountSchema, userMarketInfo2?.data));
+        expect(userMarketData2.free_coin).toBe(BigInt(0));
+        expect(userMarketData2.locked_coin).toBe(BigInt(7));
+        expect(userMarketData2.free_pc).toBe(BigInt(500));
+        expect(userMarketData2.locked_pc).toBe(BigInt(0));
+    });
+
+
 
 
 
@@ -809,5 +1027,41 @@ describe("Orderbook tests", () => {
         mintCoinAndPcToUserTx.feePayer = user.publicKey;
         mintCoinAndPcToUserTx.sign(accountsAuthority, user);
         svm.sendTransaction(mintCoinAndPcToUserTx);
+    }
+
+
+    function retrieveMakerTakerPubKeyFromEventQueueCronMethod(programId: PublicKey, marketAccount: PublicKey, marketEventsAccount: PublicKey) {
+        let mktEventInfo = svm.getAccount(marketEventsAccount);
+        //@ts-ignore
+        const mktEventData = new MarketEventsAccount(borsh.deserialize(MarketEventsAccountSchema, mktEventInfo!.data));
+
+        if (mktEventData.head == mktEventData.tail) {
+            return null;
+        } 
+        let size = mktEventData.size();
+        let count = Math.min(size, MAX_DRAIN_COUNT);
+        let tail = mktEventData.tail.valueOf();
+        let pubKeySet = new Set();
+        for (let i = tail; i < tail+count; i++) {
+            pubKeySet.add(new PublicKey(mktEventData.events[i].maker).toString());
+            pubKeySet.add(new PublicKey(mktEventData.events[i].taker).toString());
+        }
+        let userMarketList = new Array();
+        pubKeySet.forEach(pubKey => {
+            let publicKey = new PublicKey(pubKey as string);
+            let userMarketAccount = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from("user_market_account"),
+                    marketAccount.toBuffer(),
+                    publicKey.toBuffer()
+                ],
+                programId
+            )[0];
+            userMarketList.push(userMarketAccount);
+        });
+        return {
+            userMarketList: userMarketList,
+            count: count
+        }
     }
 });

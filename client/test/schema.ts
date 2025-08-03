@@ -1,5 +1,6 @@
 import * as borsh from "borsh";
 import BN from "bn.js";
+import { MAX_EVENT } from "./utils";
 
 const PubKeyType = {
     "array": {
@@ -7,6 +8,16 @@ const PubKeyType = {
         type: "u8"
     }
 };
+
+export enum Side {
+    Bid = 0,
+    Ask = 1
+}
+
+export enum EventType {
+    Fill = 0,
+    Out = 1 
+}
 
 
 export class MarketState {
@@ -51,11 +62,6 @@ export const MarketStateSchema: borsh.Schema  = {
         next_order_id: "u64",
         bump: "u8"
     }
-}
-
-export enum Side {
-  Bid = 0,
-  Ask = 1
 }
 
 export class Order {
@@ -219,12 +225,97 @@ export const UserMarketAccountSchema: borsh.Schema = {
     }
 }
 
+export class Event {
+    maker: Uint8Array;
+    taker: Uint8Array;
+    maker_order_id: bigint;
+    coin_qty: bigint;
+    pc_qty: bigint;
+    event_type: Number;
+    side: Number;
+
+    constructor(fields: {
+        maker: Uint8Array;
+        taker: Uint8Array;
+        maker_order_id: bigint;
+        coin_qty: bigint;
+        pc_qty: bigint;
+        event_type: Number;
+        side: Number;
+    }) {
+        this.maker = fields.maker
+        this.taker = fields.taker
+        this.maker_order_id = fields.maker_order_id
+        this.coin_qty = fields.coin_qty
+        this.pc_qty = fields.pc_qty
+        this.event_type = fields.event_type
+        this.side = fields.side
+    }
+}
+
+export const EventSchema: borsh.Schema = {
+    struct: {
+        event_type: "u8",
+        side: "u8",
+        maker: PubKeyType,
+        taker: PubKeyType,
+        coin_qty: "u64",
+        pc_qty: "u64",
+        maker_order_id: "u64"
+    }
+}
+
+export class MarketEventsAccount {
+    market: Uint8Array;
+    head: Number;
+    tail: Number;
+    events: Event[];
+    constructor(fields: {
+        market: Uint8Array;
+        head: Number;
+        tail: Number;
+        events: Event[];
+    }) {
+        this.market = fields.market
+        this.head = fields.head
+        this.tail = fields.tail
+        this.events = fields.events
+    }
+
+    size() {
+        if (this.head >= this.tail) {
+            return (this.head.valueOf() - this.tail.valueOf());
+        }
+        return MAX_EVENT - (this.tail.valueOf() - this.head.valueOf());
+    }
+}
+
+export const MarketEventsAccountSchema: borsh.Schema = {
+    struct: {
+        market: PubKeyType,
+        head: "u16", 
+        tail: "u16",
+        events: {
+            array: {
+                len: MAX_EVENT,
+                type: EventSchema
+            }
+        },
+    }
+}
+
 export const CreateOrderSchema: borsh.Schema = {
     struct: {
         side: "u8",
         limit_price: "u64",
         coin_qty: "u64",
         pc_qty: "u64"
+    }
+}
+
+export const ConsumeEventsSchema: borsh.Schema = {
+    struct : {
+        drain_count: "u8"
     }
 }
 

@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{account_info::{next_account_info, AccountInfo}, entrypoint::ProgramResult, msg, program::{invoke, invoke_signed}, program_error::ProgramError, program_pack::Pack, pubkey::Pubkey, system_instruction::create_account, sysvar::rent};
 use spl_token::{instruction::transfer, state::Account as TokenAccount};
 
-use crate::state::{CreateOrderArgs, OpenOrderAccount, Order, OrderBook, Side, UserMarketAccount};
+use crate::state::{CreateOrderArgs, Event, EventType, MarketEventsAccount, OpenOrderAccount, Order, OrderBook, Side, UserMarketAccount};
 
 pub fn create_order(
     program_id: &Pubkey,
@@ -15,6 +15,7 @@ pub fn create_order(
 
     let accounts_authority = next_account_info(&mut iter)?;
     let market_account = next_account_info(&mut iter)?;
+    let market_events_account = next_account_info(&mut iter)?;
     let owner_account = next_account_info(&mut iter)?;
     let user_market_account = next_account_info(&mut iter)?;
     let open_order_account = next_account_info(&mut iter)?;
@@ -36,6 +37,12 @@ pub fn create_order(
         pc_qty,
     } = args;
 
+
+    //verify market events account
+    if *market_events_account.owner != *program_id {
+        msg!("Invalid market events account provided, it has wrong owner");
+        return Err(ProgramError::InvalidAccountData);
+    }
 
     //verify open order account
     let open_order_seeds = [b"open_order", market_account.key.as_ref(), owner_account.key.as_ref()];
@@ -134,7 +141,6 @@ pub fn create_order(
                 &[user_market_bump]
             ]]
         )?;
-        msg!("After CPI: data.len = {}", user_market_account.data.borrow().len());
 
         //initialize user market data
         let user_market_data = UserMarketAccount::init(
@@ -199,6 +205,12 @@ pub fn create_order(
         }
     };
     msg!("Vault account verified");
+
+
+    //get market events account data
+    let market_events_raw_data = &mut market_events_account.data.borrow_mut();
+    let market_events_data: &mut MarketEventsAccount = bytemuck::from_bytes_mut(market_events_raw_data);
+
 
     //get bids and asks accounts' data
     let mut bids_raw_data = bids_account.data.borrow_mut();
@@ -267,7 +279,7 @@ pub fn create_order(
     let mut order_indexes_to_remove: Vec<usize> = Vec::new();
 
     for i in 0..maker_book.slots_filled {
-        let mut maker_order = &mut maker_book.orders[i as usize];
+        let maker_order = &mut maker_book.orders[i as usize];
         
         if coin_qty_remaining == 0 {
             break;
@@ -296,7 +308,21 @@ pub fn create_order(
         }
 
         //emit fill event for this order
-        msg!("emit fill");
+        let event = Event {
+            event_type: EventType::Fill,
+            side: maker_book.side,
+            maker: maker_order.owner,
+            taker: *owner_account.key,
+            coin_qty: trade_qty,
+            pc_qty: trade_qty * maker_order.price,
+            maker_order_id: maker_order.order_id
+        };
+        let result = market_events_data.enqueue(event)?;
+        if !result {
+            //TODO: handle this
+            msg!("Event Queue is Full");
+        }
+        msg!("Emitted Fill Event");
     }
     msg!("Matching complete");
 
