@@ -16,9 +16,6 @@ pub fn consume_events(
     let market_events_account = next_account_info(&mut iter)?;
     let coin_mint_account = next_account_info(&mut iter)?;
     let pc_mint_account = next_account_info(&mut iter)?;
-    let system_program_account = next_account_info(&mut iter)?;
-    let token_program_account = next_account_info(&mut iter)?;
-    let rent_sysvar_account = next_account_info(&mut iter)?;
     let user_accounts: Vec<&AccountInfo> = iter.collect();
 
     let mut user_account_map: HashMap<Pubkey, &AccountInfo> = HashMap::new();

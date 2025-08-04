@@ -43,6 +43,9 @@ pub fn create_order(
         msg!("Invalid market events account provided, it has wrong owner");
         return Err(ProgramError::InvalidAccountData);
     }
+    
+    msg!("Market Event account verified");
+
 
     //verify open order account
     let open_order_seeds = [b"open_order", market_account.key.as_ref(), owner_account.key.as_ref()];
