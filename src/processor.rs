@@ -1,7 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{entrypoint::ProgramResult, account_info::AccountInfo, pubkey::Pubkey};
 
-use crate::{instructions::{consume_events::consume_events, create_order::create_order, initialize_market::initialize_market_instruction, settle_funds::settle_funds}, state::{ConsumeEventsArgs, CreateOrderArgs}};
+use crate::{instructions::{cancel_order::cancel_order, consume_events::consume_events, create_order::create_order, initialize_market::initialize_market_instruction, settle_funds::settle_funds}, state::{CancelOrderArgs, ConsumeEventsArgs, CreateOrderArgs}};
 
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -9,7 +9,8 @@ pub enum OrderBookInstruction {
     InitializeMarket,
     CreateOrder(CreateOrderArgs),
     ConsumeEvents(ConsumeEventsArgs),
-    SettleFunds
+    SettleFunds,
+    CancelOrder(CancelOrderArgs)
 }
 
 pub fn process(
@@ -23,7 +24,8 @@ pub fn process(
         OrderBookInstruction::InitializeMarket => initialize_market_instruction(program_id, accounts)?,
         OrderBookInstruction::CreateOrder(data) => create_order(program_id, accounts, data)?,
         OrderBookInstruction::ConsumeEvents(data) => consume_events(program_id, accounts, data)?,
-        OrderBookInstruction::SettleFunds => settle_funds(program_id, accounts)?
+        OrderBookInstruction::SettleFunds => settle_funds(program_id, accounts)?,
+        OrderBookInstruction::CancelOrder(data) => cancel_order(program_id, accounts, data)?
     };
     Ok(())   
 }

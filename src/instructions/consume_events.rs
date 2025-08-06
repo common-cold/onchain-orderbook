@@ -1,4 +1,4 @@
-use std::{collections::{hash_map, HashMap}, io::Cursor};
+use std::{collections::HashMap, io::Cursor};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{account_info::{next_account_info, AccountInfo}, entrypoint::ProgramResult, msg, program_error::ProgramError, pubkey::Pubkey};
@@ -62,6 +62,7 @@ pub fn consume_events(
 
         //get the oldest added event
         let event = events_info.events[events_info.tail as usize];
+
         match event.event_type {
             EventType::Fill => {
                 //retrieve User Market Account for maker
@@ -96,6 +97,7 @@ pub fn consume_events(
                 let mut taker_uma_data = UserMarketAccount::try_from_slice(&mut reader2)?;
                 msg!("Retreived Taker's User Market Data");
 
+
                 //settle free coin and pc balance 
                 if event.side == Side::Bid {
                     maker_uma_data.free_coin += event.coin_qty;
@@ -115,7 +117,36 @@ pub fn consume_events(
                 msg!("Wrote modified data back to User market acounts");
             },
             EventType::Out => {
-                
+                //retrieve User Market Account for user
+                let maker_uma_pda = Pubkey::find_program_address(
+                    &[b"user_market_account", market_account.key.as_ref(), event.maker.as_ref()], 
+                    program_id
+                ).0;
+                let maker_uma_info = user_account_map
+                    .get(&maker_uma_pda)
+                    .ok_or_else(|| {
+                        msg!("Maker's User Market account is not provided: {}", maker_uma_pda);
+                        ProgramError::NotEnoughAccountKeys
+                })?;
+                let mut maker_uma_raw_data = maker_uma_info.data.borrow_mut();
+                let mut reader1 = &maker_uma_raw_data[..];
+                let mut maker_uma_data = UserMarketAccount::try_from_slice(&mut reader1)?;
+                msg!("Retreived User Market Data");
+
+                //settle free and locked balance                 
+                if event.side == Side::Bid {
+                    maker_uma_data.free_pc += event.pc_qty;
+                    maker_uma_data.locked_pc -= event.pc_qty;
+                } else if event.side == Side::Ask {
+                    maker_uma_data.free_coin += event.coin_qty;
+                    maker_uma_data.locked_coin -= event.coin_qty;
+                }
+                msg!("Settled free and locked balance for cancelled order");
+
+                //write modified data back to the account
+                let mut writer = Cursor::new(&mut maker_uma_raw_data[..]);
+                maker_uma_data.serialize(&mut writer)?;
+                msg!("Wrote modified data back to User market acount");
             }
         }
 
@@ -139,6 +170,6 @@ pub fn consume_events(
         ); 
         i += 1;
     }
-    msg!("Out of loop");
+    msg!("Consumed Events successfully");
     Ok(())
 } 

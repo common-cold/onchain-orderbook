@@ -134,8 +134,7 @@ export const OrderBookSchema: borsh.Schema = {
         next_order_id: "u64",
         orders: {
             "array": {
-                len: 10,
-                // len: 1024,
+                len: 1024,
                 type: OrderSchema
             }
         },
@@ -316,6 +315,13 @@ export const CreateOrderSchema: borsh.Schema = {
 export const ConsumeEventsSchema: borsh.Schema = {
     struct : {
         drain_count: "u8"
+    }
+}
+
+export const CancelOrderSchema: borsh.Schema = {
+    struct : {
+        order_id: "u64",
+        side: "u8"
     }
 }
 

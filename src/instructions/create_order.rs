@@ -38,6 +38,19 @@ pub fn create_order(
     } = args;
 
 
+    //verify market account
+    let market_seeds = &[b"market", pc_mint_account.key.as_ref(), coin_mint_account.key.as_ref()]; 
+
+    let market_pda = Pubkey::find_program_address(
+        market_seeds,
+        program_id
+    ).0;
+
+    if *market_account.key != market_pda {
+        msg!("Invalid market account provided, expected: {}", market_pda);
+        return Err(ProgramError::InvalidAccountData);
+    }
+
     //verify market events account
     if *market_events_account.owner != *program_id {
         msg!("Invalid market events account provided, it has wrong owner");

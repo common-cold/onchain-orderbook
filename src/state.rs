@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use solana_program::{msg, program_error::ProgramError, pubkey::Pubkey};
+use solana_program::{entrypoint::ProgramResult, msg, program_error::ProgramError, pubkey::Pubkey};
 use bytemuck::{Pod, Zeroable};
 
 
@@ -52,16 +52,14 @@ pub struct OrderBook {
     pub side: Side,
     pub market: Pubkey,
     pub next_order_id: u64,
-    pub orders: [Order; 10],
-    // pub orders: [Order; 1024],
+    pub orders: [Order; 1024],
     pub slots_filled: u16
 }
 
 impl OrderBook {
-    pub const LEN: usize = 1 + 32 + 8 + (97 * 10) + 2;  //1013 bytes
-    // pub const LEN: usize = 1 + 32 + 8 + (97 * 1024) + 2;  //99371 bytes
+    pub const LEN: usize = 1 + 32 + 8 + (97 * 1024) + 2;  //99371 bytes
 
-    pub fn add_order(&mut self, order: Order) -> Result<(), ProgramError> {
+    pub fn add_order(&mut self, order: Order) -> ProgramResult {
         if self.slots_filled >= 1024 {
              if self.side == Side::Bid {
                 msg!("Bids is full right now");  
@@ -71,13 +69,13 @@ impl OrderBook {
             return Err(ProgramError::Custom(1));
         }
 
-        if (self.slots_filled == 0) {
+        if self.slots_filled == 0 {
             self.orders[0] = order;
             self.slots_filled += 1;
             return Ok(());
         }
 
-        let order_slice = &self.orders[0..(self.slots_filled as usize -1)];
+        let order_slice = &self.orders[0..(self.slots_filled as usize)];
 
         let index = match self.side {
             Side::Bid => {
@@ -99,13 +97,32 @@ impl OrderBook {
         
     }
 
-    pub fn remove_order(&mut self, index: usize) -> Result<(), ProgramError> {
+    pub fn remove_order(&mut self, index: usize) -> ProgramResult {
         //shift elements left beyond index + 1 and set slots_filled_index to 0;
-        for i in (index..self.slots_filled as usize) {
+        for i in index..self.slots_filled as usize {
             self.orders[i] = self.orders[i+1];
         }
         self.slots_filled -= 1;
         Ok(())
+    }
+
+    pub fn safely_remove_order_by_order_id(&mut self, order_id: u64, owner: Pubkey) -> Result<Order, ProgramError> {
+        for i in 0..self.slots_filled {
+            if self.orders[i as usize].order_id == order_id {
+
+                if self.orders[i as usize].owner == owner {
+                    let order = self.orders[i as usize];
+                    self.remove_order(i as usize)?;
+                    return Ok(order);
+                } 
+
+                msg!("Owner mismatch, you do not own the order");
+                return Err(ProgramError::IllegalOwner);
+
+            }
+        }
+        msg!("Order Id is not present");
+        return Err(ProgramError::InvalidInstructionData);
     }
 }
 
@@ -122,16 +139,6 @@ pub struct OpenOrderAccount {
 
 impl OpenOrderAccount {
     pub const LEN: usize = 32 + 32 + (8 * 64) + 1 + 1;  //578 bytes
-
-    pub fn init(owner: &Pubkey, market: &Pubkey, bump: u8) -> Self {
-        OpenOrderAccount { 
-            owner: *owner,
-            market: *market, 
-            order_ids: [0u64; 64],
-            next_array_index: 0,
-            bump: bump
-        }
-    }
 
     pub fn create_side_encoded_order_id(plain_order_id: u64, side: Side) -> u64 {
         let side_bytes = (side as u64) << 63;
@@ -290,4 +297,10 @@ pub struct CreateOrderArgs {
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct ConsumeEventsArgs {
     pub drain_count: u8
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct CancelOrderArgs {
+    pub order_id: u64,
+    pub side: Side
 }

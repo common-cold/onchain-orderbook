@@ -60,6 +60,21 @@ pub fn settle_funds(
         msg!("User Market Account has not been initialised");
         return Err(ProgramError::InvalidAccountData);
     }    
+    
+    let mut user_market_raw_data = user_market_account.data.borrow_mut();
+    let mut reader = &user_market_raw_data[..];
+    let mut user_market_data = UserMarketAccount::try_from_slice(&mut reader)?;
+
+    if user_market_data.owner != *owner_account.key {
+        msg!("Invalid user market account, does not belongs to provided owner");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    
+    if user_market_data.market != *market_account.key {
+        msg!("Invalid user market account, does not belongs to provided market");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    msg!("User Market account verified");
 
 
     //verify coin vault account
@@ -127,11 +142,6 @@ pub fn settle_funds(
     
     msg!("Accounts verification success");
 
-    
-    //retrive user market account data
-    let mut user_market_raw_data = user_market_account.data.borrow_mut();
-    let mut reader = &user_market_raw_data[..];
-    let mut user_market_data = UserMarketAccount::try_from_slice(&mut reader)?;
 
     let coin_transfer_eligible = user_market_data.free_coin > 0;
     let pc_transfer_eligible = user_market_data.free_pc > 0;

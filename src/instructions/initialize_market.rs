@@ -1,8 +1,8 @@
 use borsh::BorshSerialize;
 use bytemuck::Zeroable;
-use solana_program::{account_info::{next_account_info, AccountInfo}, entrypoint::ProgramResult, msg, program::{invoke, invoke_signed}, program_error::ProgramError, program_pack::Pack, pubkey::Pubkey, rent::self, system_instruction::create_account};
+use solana_program::{account_info::{next_account_info, AccountInfo}, entrypoint::ProgramResult, msg, program::{invoke, invoke_signed}, program_error::ProgramError, program_pack::Pack, pubkey::Pubkey, system_instruction::create_account, sysvar::rent};
 use spl_token::{instruction::initialize_account, state::Account};
-use crate::{error::OrderbookError, state::{Event, MarketEventsAccount, MarketState, Order, OrderBook, Side, MAX_EVENT}};
+use crate::{state::{Event, MarketEventsAccount, MarketState, Order, OrderBook, Side, MAX_EVENT}};
 
 pub fn initialize_market_instruction(
     program_id: &Pubkey,
@@ -116,9 +116,6 @@ pub fn initialize_market_instruction(
 
     //initialize data inside market_events_account
     let mut events_acc_raw_data = market_events_account.data.borrow_mut();
-    msg!("DATA LEN = {}", events_acc_raw_data.len());
-    let space = std::mem::size_of::<MarketEventsAccount>();
-    msg!("DATSTRUCTA LEN = {}", space);
     let events_acc_data: &mut MarketEventsAccount = bytemuck::from_bytes_mut(&mut events_acc_raw_data);
 
     events_acc_data.market = *market_account.key;
@@ -225,8 +222,7 @@ pub fn initialize_market_instruction(
     bids_data.side = Side::Bid;
     bids_data.market = market_account.key.clone();
     bids_data.next_order_id = 0;
-    bids_data.orders = [Order::zeroed(); 10];
-    // bids_data.orders = [Order::zeroed(); 1024];
+    bids_data.orders = [Order::zeroed(); 1024];
     bids_data.slots_filled = 0;
     
     msg!("Initialised data inside bids account");
@@ -237,8 +233,7 @@ pub fn initialize_market_instruction(
 
     asks_data.side = Side::Ask;
     asks_data.market = market_account.key.clone();
-    asks_data.orders = [Order::zeroed(); 10];
-    // asks_data.orders = [Order::zeroed(); 1024];    
+    asks_data.orders = [Order::zeroed(); 1024];    
     asks_data.next_order_id = 0;
     asks_data.slots_filled = 0;
 
