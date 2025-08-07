@@ -3,7 +3,6 @@ use solana_program::{entrypoint::ProgramResult, entrypoint, pubkey::Pubkey, acco
 mod processor;
 mod state;
 mod instructions;
-mod error;
 
 entrypoint!(process_instruction);
 
